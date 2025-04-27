@@ -1,0 +1,456 @@
+--[[
+    Topp UI Library
+    A highly customizable UI library inspired by Rayfield but with more styling options
+    Features:
+    - Customizable colors, fonts, and animations
+    - Additional element types
+    - Responsive design options
+    - Advanced theming system
+]]
+
+local ToppUI = {}
+ToppUI.__index = ToppUI
+
+-- Services
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Default theme configuration with expanded options
+local DefaultTheme = {
+    MainColor = Color3.fromRGB(40, 40, 40),
+    SecondaryColor = Color3.fromRGB(30, 30, 30),
+    AccentColor = Color3.fromRGB(0, 120, 215),
+    TextColor = Color3.fromRGB(255, 255, 255),
+    DisabledColor = Color3.fromRGB(100, 100, 100),
+    
+    -- New customization options
+    BorderColor = Color3.fromRGB(60, 60, 60),
+    HoverColor = Color3.fromRGB(50, 50, 50),
+    ClickColor = Color3.fromRGB(35, 35, 35),
+    ShadowColor = Color3.fromRGB(0, 0, 0),
+    ErrorColor = Color3.fromRGB(255, 50, 50),
+    SuccessColor = Color3.fromRGB(50, 255, 50),
+    
+    -- Font options
+    Font = Enum.Font.Gotham,
+    TitleFont = Enum.Font.GothamBold,
+    TextSize = 14,
+    TitleSize = 18,
+    
+    -- Corner radius
+    CornerRadius = UDim.new(0, 6),
+    
+    -- Animation settings
+    TweenDuration = 0.2,
+    TweenEasingStyle = Enum.EasingStyle.Quad,
+    TweenEasingDirection = Enum.EasingDirection.Out,
+    
+    -- Shadow settings
+    ShadowEnabled = true,
+    ShadowBlur = 5,
+    ShadowTransparency = 0.7,
+    
+    -- Window settings
+    WindowMinSize = UDim2.new(0, 300, 0, 200),
+    WindowMaxSize = UDim2.new(0, 600, 0, 800),
+    WindowResizable = true,
+}
+
+-- Create a new Topp UI instance
+function ToppUI.new(themeConfig)
+    local self = setmetatable({}, ToppUI)
+    
+    -- Merge custom theme with defaults
+    self.Theme = table.clone(DefaultTheme)
+    if themeConfig then
+        for k, v in pairs(themeConfig) do
+            self.Theme[k] = v
+        end
+    end
+    
+    -- Create the main UI container
+    self.ScreenGui = Instance.new("ScreenGui")
+    self.ScreenGui.Name = "ToppUI"
+    self.ScreenGui.ResetOnSpawn = false
+    self.ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    self.ScreenGui.DisplayOrder = 999
+    self.ScreenGui.Parent = game:GetService("CoreGui")
+    
+    -- Store windows
+    self.Windows = {}
+    
+    -- Initialize drag manager
+    self.Dragging = nil
+    self.DragInput = nil
+    self.DragStart = nil
+    self.DragStartSize = nil
+    
+    -- Set up input connections
+    self:InitializeInput()
+    
+    return self
+end
+
+-- Initialize input handling for dragging
+function ToppUI:InitializeInput()
+    self.InputBegan = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            self:HandleDragStart(input)
+        end
+    end)
+    
+    self.InputChanged = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            self:HandleDrag(input)
+        end
+    end)
+    
+    self.InputEnded = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            self:HandleDragEnd(input)
+        end
+    end)
+end
+
+-- Handle drag start
+function ToppUI:HandleDragStart(input)
+    if self.Dragging then return end
+    
+    local gui = input.UserInputState == Enum.UserInputState.Begin and self:GetTopWindowAtPosition(input.Position)
+    if gui then
+        local dragElement = gui:FindFirstChild("DragElement")
+        local resizeElement = gui:FindFirstChild("ResizeElement")
+        
+        if dragElement and dragElement:IsA("GuiObject") and self:IsMouseOverElement(dragElement, input.Position) then
+            -- Start window drag
+            self.Dragging = gui
+            self.DragInput = input
+            self.DragStart = input.Position
+            self.DragStartPos = gui.AbsolutePosition
+            
+            -- Bring to front
+            self:BringToFront(gui)
+        elseif resizeElement and resizeElement:IsA("GuiObject") and self:IsMouseOverElement(resizeElement, input.Position) and self.Theme.WindowResizable then
+            -- Start window resize
+            self.Dragging = gui
+            self.DragInput = input
+            self.DragStart = input.Position
+            self.DragStartSize = gui.AbsoluteSize
+        end
+    end
+end
+
+-- Handle drag movement
+function ToppUI:HandleDrag(input)
+    if not self.Dragging or not self.DragInput or input ~= self.DragInput then return end
+    
+    local delta = input.Position - self.dragStart
+    if self.DragStartSize then
+        -- Resize window
+        local newSize = self.DragStartSize + Vector2.new(delta.X, delta.Y)
+        
+        -- Apply size constraints
+        newSize = Vector2.new(
+            math.clamp(newSize.X, self.Theme.WindowMinSize.X.Offset, self.Theme.WindowMaxSize.X.Offset),
+            math.clamp(newSize.Y, self.Theme.WindowMinSize.Y.Offset, self.Theme.WindowMaxSize.Y.Offset)
+        )
+        
+        self.Dragging.Size = UDim2.new(0, newSize.X, 0, newSize.Y)
+    else
+        -- Move window
+        local newPos = self.DragStartPos + delta
+        self.Dragging.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
+    end
+end
+
+-- Handle drag end
+function ToppUI:HandleDragEnd(input)
+    if input == self.DragInput then
+        self.Dragging = nil
+        self.DragInput = nil
+        self.DragStart = nil
+        self.DragStartPos = nil
+        self.DragStartSize = nil
+    end
+end
+
+-- Check if mouse is over a GUI element
+function ToppUI:IsMouseOverElement(element, position)
+    local absPos = element.AbsolutePosition
+    local absSize = element.AbsoluteSize
+    return position.X >= absPos.X and position.X <= absPos.X + absSize.X and
+           position.Y >= absPos.Y and position.Y <= absPos.Y + absSize.Y
+end
+
+-- Get the topmost window at a position
+function ToppUI:GetTopWindowAtPosition(position)
+    for i = #self.Windows, 1, -1 do
+        local window = self.Windows[i]
+        if window.Visible and self:IsMouseOverElement(window, position) then
+            return window
+        end
+    end
+    return nil
+end
+
+-- Bring a window to the front
+function ToppUI:BringToFront(window)
+    for i, w in ipairs(self.Windows) do
+        if w == window then
+            table.remove(self.Windows, i)
+            table.insert(self.Windows, w)
+            w.ZIndex = #self.Windows + 10
+            break
+        end
+    end
+end
+
+-- Create a new window
+function ToppUI:CreateWindow(options)
+    options = options or {}
+    
+    local windowName = options.Name or "Window"
+    local windowSize = options.Size or UDim2.new(0, 500, 0, 400)
+    
+    -- Create window frame
+    local window = Instance.new("Frame")
+    window.Name = windowName
+    window.BackgroundColor3 = self.Theme.MainColor
+    window.BorderSizePixel = 0
+    window.Position = UDim2.new(0.5, -windowSize.X.Offset/2, 0.5, -windowSize.Y.Offset/2)
+    window.Size = windowSize
+    window.ZIndex = #self.Windows + 10
+    window.ClipsDescendants = true
+    
+    -- Apply corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = self.Theme.CornerRadius
+    corner.Parent = window
+    
+    -- Add shadow effect if enabled
+    if self.Theme.ShadowEnabled then
+        local shadow = Instance.new("ImageLabel")
+        shadow.Name = "Shadow"
+        shadow.BackgroundTransparency = 1
+        shadow.Image = "rbxassetid://1316045217"
+        shadow.ImageColor3 = self.Theme.ShadowColor
+        shadow.ImageTransparency = self.Theme.ShadowTransparency
+        shadow.ScaleType = Enum.ScaleType.Slice
+        shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+        shadow.Size = UDim2.new(1, 20, 1, 20)
+        shadow.Position = UDim2.new(0, -10, 0, -10)
+        shadow.ZIndex = window.ZIndex - 1
+        shadow.Parent = window
+    end
+    
+    -- Create title bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.BackgroundColor3 = self.Theme.SecondaryColor
+    titleBar.BorderSizePixel = 0
+    titleBar.Size = UDim2.new(1, 0, 0, 30)
+    titleBar.ZIndex = window.ZIndex + 1
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, self.Theme.CornerRadius.Offset)
+    titleCorner.Parent = titleBar
+    
+    -- Add drag element to title bar
+    local dragElement = Instance.new("TextButton")
+    dragElement.Name = "DragElement"
+    dragElement.BackgroundTransparency = 1
+    dragElement.Text = ""
+    dragElement.Size = UDim2.new(1, -60, 1, 0)
+    dragElement.ZIndex = titleBar.ZIndex + 1
+    dragElement.Parent = titleBar
+    
+    -- Window title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.Size = UDim2.new(1, -10, 1, 0)
+    title.Font = self.Theme.TitleFont
+    title.Text = windowName
+    title.TextColor3 = self.Theme.TextColor
+    title.TextSize = self.Theme.TitleSize
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = titleBar.ZIndex + 1
+    title.Parent = titleBar
+    
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.BackgroundTransparency = 1
+    closeButton.Position = UDim2.new(1, -30, 0, 0)
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Font = self.Theme.Font
+    closeButton.Text = "X"
+    closeButton.TextColor3 = self.Theme.TextColor
+    closeButton.TextSize = self.Theme.TitleSize
+    closeButton.ZIndex = titleBar.ZIndex + 1
+    closeButton.Parent = titleBar
+    
+    -- Resize handle (only if resizable)
+    if self.Theme.WindowResizable then
+        local resizeHandle = Instance.new("Frame")
+        resizeHandle.Name = "ResizeElement"
+        resizeHandle.BackgroundTransparency = 1
+        resizeHandle.Position = UDim2.new(1, -20, 1, -20)
+        resizeHandle.Size = UDim2.new(0, 20, 0, 20)
+        resizeHandle.ZIndex = window.ZIndex + 1
+        resizeHandle.Parent = window
+        
+        local resizeIcon = Instance.new("ImageLabel")
+        resizeIcon.Name = "ResizeIcon"
+        resizeIcon.BackgroundTransparency = 1
+        resizeIcon.Image = "rbxassetid://3926305904"
+        resizeIcon.ImageRectOffset = Vector2.new(324, 364)
+        resizeIcon.ImageRectSize = Vector2.new(36, 36)
+        resizeIcon.Size = UDim2.new(1, 0, 1, 0)
+        resizeIcon.ImageColor3 = self.Theme.TextColor
+        resizeIcon.ZIndex = resizeHandle.ZIndex + 1
+        resizeIcon.Parent = resizeHandle
+    end
+    
+    -- Create content frame
+    local content = Instance.new("ScrollingFrame")
+    content.Name = "Content"
+    content.BackgroundTransparency = 1
+    content.BorderSizePixel = 0
+    content.Position = UDim2.new(0, 0, 0, 30)
+    content.Size = UDim2.new(1, 0, 1, -30)
+    content.ScrollBarThickness = 5
+    content.ScrollBarImageColor3 = self.Theme.AccentColor
+    content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    content.CanvasSize = UDim2.new(0, 0, 0, 0)
+    content.ZIndex = window.ZIndex + 1
+    
+    local contentLayout = Instance.new("UIListLayout")
+    contentLayout.Name = "ContentLayout"
+    contentLayout.Padding = UDim.new(0, 5)
+    contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    contentLayout.Parent = content
+    
+    -- Assemble window
+    titleBar.Parent = window
+    content.Parent = window
+    window.Parent = self.ScreenGui
+    
+    -- Add to windows list
+    table.insert(self.Windows, window)
+    
+    -- Close button functionality
+    closeButton.MouseButton1Click:Connect(function()
+        window.Visible = false
+    end)
+    
+    -- Window API
+    local windowAPI = {}
+    
+    function windowAPI:Toggle()
+        window.Visible = not window.Visible
+        if window.Visible then
+            self:BringToFront(window)
+        end
+    end
+    
+    function windowAPI:SetTitle(newTitle)
+        title.Text = newTitle
+    end
+    
+    function windowAPI:Resize(newSize)
+        window.Size = newSize
+    end
+    
+    function windowAPI:Move(newPosition)
+        window.Position = newPosition
+    end
+    
+    function windowAPI:Destroy()
+        window:Destroy()
+        for i, w in ipairs(self.Windows) do
+            if w == window then
+                table.remove(self.Windows, i)
+                break
+            end
+        end
+    end
+    
+    -- Create elements within the window
+    function windowAPI:CreateTab(tabName)
+        -- Tab implementation would go here
+        -- Returns a tab API similar to Rayfield's
+    end
+    
+    return windowAPI
+end
+
+-- Example element creation functions (similar to Rayfield's but with more options)
+function ToppUI:CreateButton(window, options)
+    -- Button implementation with extra styling options
+end
+
+function ToppUI:CreateToggle(window, options)
+    -- Toggle implementation with extra styling options
+end
+
+function ToppUI:CreateSlider(window, options)
+    -- Slider implementation with extra styling options
+end
+
+function ToppUI:CreateDropdown(window, options)
+    -- Dropdown implementation with extra styling options
+end
+
+function ToppUI:CreateColorPicker(window, options)
+    -- Color picker implementation with extra styling options
+end
+
+function ToppUI:CreateKeybind(window, options)
+    -- Keybind implementation with extra styling options
+end
+
+function ToppUI:CreateInput(window, options)
+    -- Input implementation with extra styling options
+end
+
+function ToppUI:CreateLabel(window, options)
+    -- Label implementation with extra styling options
+end
+
+-- New element types not in Rayfield
+function ToppUI:CreateProgressBar(window, options)
+    -- Progress bar implementation
+end
+
+function ToppUI:CreateNotification(options)
+    -- Notification system implementation
+end
+
+function ToppUI:CreateTooltip(element, text)
+    -- Tooltip implementation
+end
+
+-- Theme management
+function ToppUI:UpdateTheme(newTheme)
+    for k, v in pairs(newTheme) do
+        self.Theme[k] = v
+    end
+    self:ApplyThemeToAllWindows()
+end
+
+function ToppUI:ApplyThemeToAllWindows()
+    -- Apply current theme to all existing UI elements
+end
+
+-- Cleanup
+function ToppUI:Destroy()
+    self.ScreenGui:Destroy()
+    if self.InputBegan then self.InputBegan:Disconnect() end
+    if self.InputChanged then self.InputChanged:Disconnect() end
+    if self.InputEnded then self.InputEnded:Disconnect() end
+end
+
+return ToppUI
